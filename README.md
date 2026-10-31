@@ -232,6 +232,64 @@ GET /comments?_embed=post
 GET /posts?_where={"or":[{"views":{"gt":100}},{"author":{"name":{"lt":"m"}}}]}
 ```
 
+## JSON Patch
+
+`PATCH /:name/:id` also accepts [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) JSON Patch documents. Send the request with `Content-Type: application/json-patch+json` and a JSON array of operations as the body.
+
+With `Content-Type: application/json`, `PATCH` keeps merging the JSON object into the item as before.
+
+```bash
+curl -X PATCH http://localhost:3000/posts/1 \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[
+    { "op": "test", "path": "/title", "value": "a title" },
+    { "op": "replace", "path": "/title", "value": "updated" },
+    { "op": "add", "path": "/tags", "value": ["news"] },
+    { "op": "add", "path": "/tags/-", "value": "featured" }
+  ]'
+```
+
+**Response:**
+```json
+{
+  "id": "1",
+  "title": "updated",
+  "views": 100,
+  "tags": ["news", "featured"]
+}
+```
+
+Operations:
+
+- `add` adds a value, or inserts into an array (use `-` as the last path segment to append)
+- `remove` removes a value
+- `replace` replaces an existing value
+- `move` moves a value from one path (`from`) to another (`path`)
+- `copy` copies a value from one path (`from`) to another (`path`)
+- `test` checks that the value at `path` equals `value`
+
+Paths are [JSON Pointers](https://datatracker.ietf.org/doc/html/rfc6901): use `~0` for `~` and `~1` for `/` in keys.
+
+The patch is applied atomically: if any operation fails, including a `test`, nothing is saved and the item is left unchanged.
+
+### Errors
+
+- `422` if the patch document is invalid or an operation fails
+- `404` if the item doesn't exist
+
+```bash
+curl -X PATCH http://localhost:3000/posts/1 \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[{ "op": "test", "path": "/title", "value": "wrong title" }]'
+```
+
+**Response (422):**
+```json
+{
+  "error": "Operation 0 (test) failed: Test failed at \"/title\""
+}
+```
+
 ## Delete dependents
 
 ```http
