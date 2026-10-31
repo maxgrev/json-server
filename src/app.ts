@@ -8,6 +8,7 @@ import { Low } from 'lowdb'
 import { json } from 'milliparsec'
 import sirv from 'sirv'
 
+import { JsonPatchError } from './json-patch.ts'
 import { parseWhere } from './parse-where.ts'
 import type { Data } from './service.ts'
 import { isItem, Service } from './service.ts'
@@ -91,6 +92,31 @@ function withIdAndBody(
   }
 }
 
+function isJsonPatch(req: any): boolean {
+  const contentType = req.headers?.['content-type']
+  if (typeof contentType !== 'string') return false
+  const mediaType = contentType.split(';')[0]?.trim().toLowerCase()
+  return mediaType === 'application/json-patch+json'
+}
+
+function withJsonPatch(
+  action: (name: string, id: string, patch: unknown) => Promise<unknown>,
+) {
+  return async (req: any, res: any, next: any) => {
+    const { name = '', id = '' } = req.params
+    try {
+      res.locals['data'] = await action(name, id, req.body)
+    } catch (e) {
+      if (e instanceof JsonPatchError) {
+        res.status(422).json({ error: e.message })
+        return
+      }
+      throw e
+    }
+    next?.()
+  }
+}
+
 export function createApp(db: Low<Data>, options: AppOptions = {}) {
   // Create service
   const service = new Service(db)
@@ -148,7 +174,14 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   app.patch('/:name', withBody(service.patch.bind(service)))
 
-  app.patch('/:name/:id', withIdAndBody(service.patchById.bind(service)))
+  const mergePatchById = withIdAndBody(service.patchById.bind(service))
+  const jsonPatchById = withJsonPatch(service.jsonPatchById.bind(service))
+
+  // application/json-patch+json is applied as an RFC 6902 JSON Patch,
+  // anything else is merged into the item
+  app.patch('/:name/:id', (req, res, next) =>
+    isJsonPatch(req) ? jsonPatchById(req, res, next) : mergePatchById(req, res, next),
+  )
 
   app.delete('/:name/:id', async (req, res, next) => {
     const { name = '', id = '' } = req.params

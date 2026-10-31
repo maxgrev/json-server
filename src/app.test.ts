@@ -179,4 +179,115 @@ await test('createApp', async (t) => {
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
+
+  await t.test('PATCH /posts/:id with JSON Patch', async (t) => {
+    const url = `http://localhost:${port}/posts/1`
+    const reset = () => {
+      db.data = {
+        posts: [{ id: '1', title: 'foo', tags: ['a'] }],
+        comments: [{ id: '1', postId: '1' }],
+        object: { f1: 'foo' },
+      }
+    }
+    const patch = (body: unknown, contentType = 'application/json-patch+json') =>
+      fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': contentType },
+        body: JSON.stringify(body),
+      })
+
+    await t.test('applies operations and stores the result', async () => {
+      reset()
+      const response = await patch([
+        { op: 'test', path: '/title', value: 'foo' },
+        { op: 'replace', path: '/title', value: 'bar' },
+        { op: 'add', path: '/tags/-', value: 'b' },
+        { op: 'add', path: '/views', value: 1 },
+      ])
+      assert.equal(response.status, 200)
+      const expected = { id: '1', title: 'bar', tags: ['a', 'b'], views: 1 }
+      assert.deepEqual(await response.json(), expected)
+      assert.deepEqual(db.data['posts'], [expected])
+      const get = await fetch(url)
+      assert.deepEqual(await get.json(), expected)
+    })
+
+    await t.test('accepts content type parameters and any case', async () => {
+      reset()
+      const response = await patch(
+        [{ op: 'remove', path: '/tags' }],
+        'Application/JSON-Patch+JSON; charset=utf-8',
+      )
+      assert.equal(response.status, 200)
+      assert.deepEqual(db.data['posts'], [{ id: '1', title: 'foo' }])
+    })
+
+    await t.test('application/json still merges', async () => {
+      reset()
+      const response = await patch({ title: 'merged' }, 'application/json')
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { id: '1', title: 'merged', tags: ['a'] })
+      assert.deepEqual(db.data['posts'], [{ id: '1', title: 'merged', tags: ['a'] }])
+    })
+
+    await t.test('application/json with an array body still returns 400', async () => {
+      reset()
+      const response = await patch([{ op: 'remove', path: '/title' }], 'application/json')
+      assert.equal(response.status, 400)
+      assert.deepEqual(db.data['posts'], [{ id: '1', title: 'foo', tags: ['a'] }])
+    })
+
+    const invalid: [string, unknown][] = [
+      ['an object instead of an array', { title: 'bar' }],
+      ['an unknown op', [{ op: 'nope', path: '/title' }]],
+      ['a missing value', [{ op: 'add', path: '/title' }]],
+      ['an invalid pointer', [{ op: 'remove', path: 'title' }]],
+      [
+        'a failed test operation',
+        [
+          { op: 'replace', path: '/title', value: 'bar' },
+          { op: 'test', path: '/title', value: 'nope' },
+        ],
+      ],
+      [
+        'a failing operation after successful ones',
+        [
+          { op: 'replace', path: '/title', value: 'bar' },
+          { op: 'remove', path: '/missing' },
+        ],
+      ],
+      ['a result that is not an object', [{ op: 'replace', path: '', value: [1] }]],
+      ['an id change', [{ op: 'replace', path: '/id', value: '2' }]],
+    ]
+    for (const [name, body] of invalid) {
+      await t.test(`returns 422 and changes nothing for ${name}`, async () => {
+        reset()
+        const response = await patch(body)
+        assert.equal(response.status, 422)
+        const data = (await response.json()) as { error: unknown }
+        assert.equal(typeof data.error, 'string')
+        assert.deepEqual(db.data['posts'], [{ id: '1', title: 'foo', tags: ['a'] }])
+      })
+    }
+
+    await t.test('returns 404 for a missing item', async () => {
+      reset()
+      const response = await fetch(`http://localhost:${port}/posts/-1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json-patch+json' },
+        body: JSON.stringify([{ op: 'replace', path: '/title', value: 'bar' }]),
+      })
+      assert.equal(response.status, 404)
+      assert.deepEqual(await response.json(), { error: 'Not Found' })
+    })
+
+    await t.test('returns 404 for an unknown resource', async () => {
+      const response = await fetch(`http://localhost:${port}/not-found/1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json-patch+json' },
+        body: JSON.stringify([]),
+      })
+      assert.equal(response.status, 404)
+    })
+  })
 })
