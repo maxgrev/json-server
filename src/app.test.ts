@@ -180,3 +180,54 @@ await test('createApp', async (t) => {
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
 })
+
+await test('createApp delay option', async (t) => {
+  async function startApp(options: { delay?: number }) {
+    const delayDb = new Low<Data>(new Memory<Data>(), {})
+    delayDb.data = { posts: [{ id: '1', title: 'foo' }] }
+    const delayPort = await getPort()
+    const delayApp = createApp(delayDb, options)
+    const server = await new Promise<ReturnType<typeof delayApp.listen>>((resolve) => {
+      const s = delayApp.listen(delayPort, () => resolve(s))
+    })
+    t.after(() => server.close())
+    return `http://localhost:${delayPort}`
+  }
+
+  async function time(url: string): Promise<{ status: number; elapsed: number }> {
+    const start = performance.now()
+    const response = await fetch(url)
+    await response.text()
+    return { status: response.status, elapsed: performance.now() - start }
+  }
+
+  await t.test('waits at least the configured delay before answering', async () => {
+    const delay = 200
+    const baseUrl = await startApp({ delay })
+    // Allow 1ms for timer and clock rounding differences
+    for (const path of ['/posts', '/posts/1', '/not-found']) {
+      const { status, elapsed } = await time(`${baseUrl}${path}`)
+      assert.ok(status === 200 || status === 404)
+      assert.ok(elapsed >= delay - 1, `${path} took ${elapsed}ms, expected >= ${delay}ms`)
+    }
+  })
+
+  await t.test('has no delay by default', async () => {
+    const baseUrl = await startApp({})
+    const { status, elapsed } = await time(`${baseUrl}/posts`)
+    assert.equal(status, 200)
+    assert.ok(elapsed < 150, `request took ${elapsed}ms, expected no delay`)
+  })
+
+  await t.test('has no delay when delay is 0', async () => {
+    const baseUrl = await startApp({ delay: 0 })
+    const { elapsed } = await time(`${baseUrl}/posts`)
+    assert.ok(elapsed < 150, `request took ${elapsed}ms, expected no delay`)
+  })
+
+  await t.test('throws on invalid delay', () => {
+    const delayDb = new Low<Data>(new Memory<Data>(), {})
+    assert.throws(() => createApp(delayDb, { delay: -1 }), /Invalid --delay value/)
+    assert.throws(() => createApp(delayDb, { delay: Number.NaN }), /Invalid --delay value/)
+  })
+})

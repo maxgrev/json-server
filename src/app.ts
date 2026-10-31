@@ -8,6 +8,7 @@ import { Low } from 'lowdb'
 import { json } from 'milliparsec'
 import sirv from 'sirv'
 
+import { parseDelay } from './parse-delay.ts'
 import { parseWhere } from './parse-where.ts'
 import type { Data } from './service.ts'
 import { isItem, Service } from './service.ts'
@@ -18,6 +19,8 @@ const isProduction = process.env['NODE_ENV'] === 'production'
 export type AppOptions = {
   logger?: boolean
   static?: string[]
+  // Milliseconds to wait before handling each request (default: no delay)
+  delay?: number
 }
 
 const eta = new Eta({
@@ -97,6 +100,15 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   // Create app
   const app = new App()
+
+  // Delay
+  const delay = options.delay ?? 0
+  parseDelay(String(delay))
+  if (delay > 0) {
+    app.use((_req, _res, next) => {
+      setTimeout(() => next?.(), delay)
+    })
+  }
 
   // Static files
   app.use(sirv('public', { dev: !isProduction }))
