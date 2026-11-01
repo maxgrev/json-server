@@ -88,6 +88,16 @@ curl http://localhost:3000/posts/1
 
 Run `json-server --help` for a list of options
 
+### Delay responses
+
+Use `--delay <ms>` to hold every response for the given number of milliseconds (a non-negative integer). This is handy to simulate a slow network:
+
+```bash
+json-server db.json --delay 500
+```
+
+The delay applies to all responses, including static files, the index page, CORS preflight (`OPTIONS`) requests and 404s. When omitted, responses are not delayed.
+
 ## Sponsors ✨
 
 ### Gold
@@ -258,6 +268,6 @@ If you are upgrading from json-server v0.x, note these behavioral changes:
 - **ID handling:** `id` is always a string and will be auto-generated if not provided
 - **Pagination:** Use `_per_page` with `_page` instead of the deprecated `_limit` parameter
 - **Relationships:** Use `_embed` instead of `_expand` for including related resources
-- **Request delays:** Use browser DevTools (Network tab > throttling) instead of the removed `--delay` CLI option
+- **Request delays:** The `--delay <ms>` CLI option is supported, see [Delay responses](#delay-responses)
 
 > **New to json-server?** These notes are for users migrating from v0. If this is your first time using json-server, you can ignore this section.
