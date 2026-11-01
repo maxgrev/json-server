@@ -180,3 +180,63 @@ await test('createApp', async (t) => {
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
 })
+
+await test('createApp with delay', async (t) => {
+  const DELAY = 200
+  // Allow for timer jitter: timers may fire slightly early relative to wall-clock measurement
+  const TOLERANCE = 20
+
+  const delayedDb = new Low<Data>(new Memory<Data>(), {})
+  delayedDb.data = { posts: [{ id: '1', title: 'foo' }] }
+
+  async function listen(options: { delay?: number }) {
+    const appPort = await getPort()
+    const instance = createApp(delayedDb, { static: [tmpDir], ...options })
+    const server = await new Promise<ReturnType<typeof instance.listen>>((resolve) => {
+      const s = instance.listen(appPort, () => resolve(s))
+    })
+    t.after(() => server.close())
+    return appPort
+  }
+
+  async function timedFetch(url: string, method = 'GET') {
+    const start = performance.now()
+    const response = await fetch(url, { method })
+    await response.arrayBuffer()
+    return { status: response.status, elapsed: performance.now() - start }
+  }
+
+  const delayedPort = await listen({ delay: DELAY })
+  const noDelayPort = await listen({})
+  const zeroDelayPort = await listen({ delay: 0 })
+
+  const cases: { method: string; url: string; statusCode: number }[] = [
+    { method: 'GET', url: '/posts', statusCode: 200 },
+    { method: 'GET', url: `/${file}`, statusCode: 200 },
+    { method: 'GET', url: '/', statusCode: 200 },
+    { method: 'OPTIONS', url: '/posts', statusCode: 204 },
+    { method: 'GET', url: '/not-found', statusCode: 404 },
+  ]
+
+  for (const tc of cases) {
+    await t.test(`${tc.method} ${tc.url} is delayed`, async () => {
+      const { status, elapsed } = await timedFetch(
+        `http://localhost:${delayedPort}${tc.url}`,
+        tc.method,
+      )
+      assert.equal(status, tc.statusCode)
+      assert.ok(
+        elapsed >= DELAY - TOLERANCE,
+        `expected >= ${DELAY - TOLERANCE}ms, got ${elapsed}ms`,
+      )
+    })
+
+    await t.test(`${tc.method} ${tc.url} without delay is unchanged`, async () => {
+      for (const p of [noDelayPort, zeroDelayPort]) {
+        const { status, elapsed } = await timedFetch(`http://localhost:${p}${tc.url}`, tc.method)
+        assert.equal(status, tc.statusCode)
+        assert.ok(elapsed < DELAY, `expected < ${DELAY}ms, got ${elapsed}ms`)
+      }
+    })
+  }
+})
