@@ -154,6 +154,55 @@ PUT   /profile
 PATCH /profile
 ```
 
+## JSON Patch
+
+`PATCH /:name/:id` also accepts a [JSON Patch](https://datatracker.ietf.org/doc/html/rfc6902) document (RFC 6902) when the request uses `Content-Type: application/json-patch+json`. With `Content-Type: application/json`, `PATCH` keeps merging the body into the item.
+
+```bash
+curl -X PATCH http://localhost:3000/posts/1 \
+  -H "Content-Type: application/json-patch+json" \
+  -d '[
+    { "op": "test", "path": "/title", "value": "a title" },
+    { "op": "replace", "path": "/title", "value": "new title" },
+    { "op": "add", "path": "/tags", "value": [] },
+    { "op": "add", "path": "/tags/-", "value": "news" }
+  ]'
+```
+
+**Response:**
+```json
+{
+  "id": "1",
+  "title": "new title",
+  "views": 100,
+  "tags": ["news"]
+}
+```
+
+Operations:
+
+- `add` adds a value at `path` (use `-` as the last array index to append)
+- `remove` removes the value at `path`
+- `replace` replaces the value at `path`
+- `move` moves the value at `from` to `path`
+- `copy` copies the value at `from` to `path`
+- `test` checks that the value at `path` equals `value`
+
+Paths are [JSON Pointers](https://datatracker.ietf.org/doc/html/rfc6901): use `~0` for `~` and `~1` for `/` in property names.
+
+The patch is applied atomically: if an operation fails, nothing is changed. The `id` can't be changed.
+
+**Errors:**
+
+- `404` if the item doesn't exist
+- `422` if the patch document is invalid or an operation fails (including a failed `test`)
+
+```json
+{
+  "error": "operation 0: test failed at \"/title\""
+}
+```
+
 ## Query params
 
 ### Conditions
