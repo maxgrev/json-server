@@ -8,6 +8,7 @@ import { Low } from 'lowdb'
 import { json } from 'milliparsec'
 import sirv from 'sirv'
 
+import { JsonPatchError } from './json-patch.ts'
 import { parseWhere } from './parse-where.ts'
 import type { Data } from './service.ts'
 import { isItem, Service } from './service.ts'
@@ -91,6 +92,48 @@ function withIdAndBody(
   }
 }
 
+const JSON_PATCH_MEDIA_TYPE = 'application/json-patch+json'
+
+// Media types are case-insensitive and may carry parameters (e.g. charset)
+function isJsonPatch(req: any): boolean {
+  const contentType = req.headers?.['content-type']
+  if (typeof contentType !== 'string') return false
+  return contentType.split(';')[0]?.trim().toLowerCase() === JSON_PATCH_MEDIA_TYPE
+}
+
+// Handles RFC 6902 requests. 400: malformed patch document, 422: well-formed
+// patch that can't be applied, 404 (via next): missing resource or item.
+function withJsonPatch(
+  action: (name: string, id: string | undefined, ops: unknown) => Promise<unknown>,
+) {
+  return async (req: any, res: any, next: any) => {
+    const { name = '', id } = req.params
+    if (!Array.isArray(req.body)) {
+      res.status(400).json({ error: 'Body must be a JSON Patch array' })
+      return
+    }
+    try {
+      res.locals['data'] = await action(name, id, req.body)
+    } catch (err) {
+      if (err instanceof JsonPatchError) {
+        res.status(err.kind === 'invalid' ? 400 : 422).json({ error: err.message })
+        return
+      }
+      throw err
+    }
+    next?.()
+  }
+}
+
+// Routes JSON Patch requests to `jsonPatch`, everything else to `merge`
+function dispatchPatch(
+  jsonPatch: (req: any, res: any, next: any) => unknown,
+  merge: typeof jsonPatch,
+) {
+  return (req: any, res: any, next: any) =>
+    isJsonPatch(req) ? jsonPatch(req, res, next) : merge(req, res, next)
+}
+
 export function createApp(db: Low<Data>, options: AppOptions = {}) {
   // Create service
   const service = new Service(db)
@@ -146,9 +189,21 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   app.put('/:name/:id', withIdAndBody(service.updateById.bind(service)))
 
-  app.patch('/:name', withBody(service.patch.bind(service)))
+  app.patch(
+    '/:name',
+    dispatchPatch(
+      withJsonPatch((name, _id, ops) => service.jsonPatch(name, ops)),
+      withBody(service.patch.bind(service)),
+    ),
+  )
 
-  app.patch('/:name/:id', withIdAndBody(service.patchById.bind(service)))
+  app.patch(
+    '/:name/:id',
+    dispatchPatch(
+      withJsonPatch((name, id, ops) => service.jsonPatchById(name, id as string, ops)),
+      withIdAndBody(service.patchById.bind(service)),
+    ),
+  )
 
   app.delete('/:name/:id', async (req, res, next) => {
     const { name = '', id = '' } = req.params

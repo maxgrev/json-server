@@ -154,6 +154,39 @@ PUT   /profile
 PATCH /profile
 ```
 
+### PATCH
+
+`PATCH` on `/:name/:id` (and on object resources like `/profile`) behaves differently depending on the `Content-Type` header:
+
+- `application/json` (or no `Content-Type`): the body is a JSON object that is shallow-merged into the item (existing behavior). An array or other non-object body returns `400`.
+- `application/json-patch+json`: the body is an [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) JSON Patch array. The media type is case-insensitive and parameters such as `charset` are ignored.
+
+```sh
+curl -X PATCH http://localhost:3000/posts/1 \
+  -H 'Content-Type: application/json-patch+json' \
+  -d '[
+    { "op": "replace", "path": "/title", "value": "Hello" },
+    { "op": "add", "path": "/tags/-", "value": "news" },
+    { "op": "test", "path": "/views", "value": 100 }
+  ]'
+```
+
+Supported operations: `add`, `remove`, `replace`, `move`, `copy` and `test`. The patch is atomic: if any operation fails, nothing is changed or written. On success the updated item is returned with `200`.
+
+Notes:
+
+- The `id` of an array item can't be changed: a patch that writes to `/id` is rejected.
+- The root (`""`) of an object resource can't be replaced or removed.
+
+Status codes for JSON Patch requests (error responses have an `{ "error": "..." }` body):
+
+| Status | Meaning                                                                                               |
+| ------ | ----------------------------------------------------------------------------------------------------- |
+| `200`  | Patch applied, updated item returned                                                                  |
+| `400`  | Malformed patch: body isn't an array, unknown `op`, missing `path`/`value`/`from`, invalid pointer    |
+| `404`  | Resource or item not found                                                                            |
+| `422`  | Well-formed patch that can't be applied: missing path, failed `test`, bad array index, change of `id` |
+
 ## Query params
 
 ### Conditions

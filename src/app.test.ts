@@ -179,4 +179,154 @@ await test('createApp', async (t) => {
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
+
+  await t.test('JSON Patch', async (t) => {
+    const reset = () => {
+      db.data = {
+        posts: [{ id: '1', title: 'foo' }],
+        comments: [{ id: '1', postId: '1' }],
+        object: { f1: 'foo' },
+      }
+    }
+    const patch = (url: string, body: unknown, contentType = 'application/json-patch+json') =>
+      fetch(`http://localhost:${port}${url}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': contentType },
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      })
+
+    await t.test('PATCH /posts/1 replaces a field', async () => {
+      reset()
+      const response = await patch('/posts/1', [{ op: 'replace', path: '/title', value: 'x' }])
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { id: '1', title: 'x' })
+      assert.deepEqual(db.data?.['posts'], [{ id: '1', title: 'x' }])
+    })
+
+    await t.test('PATCH /object adds a field', async () => {
+      reset()
+      const response = await patch('/object', [{ op: 'add', path: '/f2', value: { a: [1] } }])
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { f1: 'foo', f2: { a: [1] } })
+    })
+
+    await t.test('supports move, copy, test and remove', async () => {
+      reset()
+      const response = await patch('/posts/1', [
+        { op: 'copy', from: '/title', path: '/copy' },
+        { op: 'move', from: '/copy', path: '/moved' },
+        { op: 'test', path: '/moved', value: 'foo' },
+        { op: 'remove', path: '/title' },
+      ])
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { id: '1', moved: 'foo' })
+    })
+
+    for (const contentType of [
+      'application/json-patch+json; charset=utf-8',
+      'Application/JSON-Patch+JSON',
+    ]) {
+      await t.test(`Content-Type "${contentType}" is treated as JSON Patch`, async () => {
+        reset()
+        const response = await patch(
+          '/posts/1',
+          [{ op: 'add', path: '/views', value: 1 }],
+          contentType,
+        )
+        assert.equal(response.status, 200)
+        assert.deepEqual(await response.json(), { id: '1', title: 'foo', views: 1 })
+      })
+    }
+
+    await t.test('application/json still shallow merges', async () => {
+      reset()
+      const response = await patch('/posts/1', { views: 1 }, 'application/json')
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { id: '1', title: 'foo', views: 1 })
+    })
+
+    await t.test('application/json with array body returns 400', async () => {
+      reset()
+      const response = await patch(
+        '/posts/1',
+        [{ op: 'replace', path: '/title', value: 'x' }],
+        'application/json',
+      )
+      assert.equal(response.status, 400)
+      assert.deepEqual(await response.json(), { error: 'Body must be a JSON object' })
+      assert.deepEqual(db.data?.['posts'], [{ id: '1', title: 'foo' }])
+    })
+
+    const malformed: [string, unknown][] = [
+      ['body is not an array', { op: 'add', path: '/a', value: 1 }],
+      ['unknown op', [{ op: 'bogus', path: '/a' }]],
+      ['missing path', [{ op: 'add', value: 1 }]],
+      ['empty body', ''],
+    ]
+    for (const [title, body] of malformed) {
+      await t.test(`${title} returns 400`, async () => {
+        reset()
+        for (const url of ['/posts/1', '/object']) {
+          const response = await patch(url, body)
+          assert.equal(response.status, 400, `${url}`)
+          const data = (await response.json()) as { error: unknown }
+          assert.equal(typeof data.error, 'string')
+        }
+      })
+    }
+
+    await t.test('remove on a nonexistent path returns 422', async () => {
+      reset()
+      const response = await patch('/posts/1', [{ op: 'remove', path: '/nope' }])
+      assert.equal(response.status, 422)
+      const data = (await response.json()) as { error: unknown }
+      assert.equal(typeof data.error, 'string')
+    })
+
+    await t.test('failing test op returns 422 and leaves data unchanged', async () => {
+      reset()
+      const response = await patch('/posts/1', [
+        { op: 'replace', path: '/title', value: 'x' },
+        { op: 'test', path: '/title', value: 'nope' },
+      ])
+      assert.equal(response.status, 422)
+      assert.deepEqual(db.data?.['posts'], [{ id: '1', title: 'foo' }])
+    })
+
+    await t.test('replacing /id returns 422 and keeps the id', async () => {
+      reset()
+      const response = await patch('/posts/1', [{ op: 'replace', path: '/id', value: '2' }])
+      assert.equal(response.status, 422)
+      assert.deepEqual(db.data?.['posts'], [{ id: '1', title: 'foo' }])
+    })
+
+    await t.test('replacing the root of an object resource returns 422', async () => {
+      reset()
+      const response = await patch('/object', [{ op: 'replace', path: '', value: {} }])
+      assert.equal(response.status, 422)
+      assert.deepEqual(db.data?.['object'], { f1: 'foo' })
+    })
+
+    await t.test('missing item or resource returns 404', async () => {
+      reset()
+      for (const url of ['/posts/-1', '/posts', '/object/1', '/not-found']) {
+        const response = await patch(url, [{ op: 'add', path: '/a', value: 1 }])
+        assert.equal(response.status, 404, url)
+        assert.deepEqual(await response.json(), { error: 'Not Found' })
+      }
+    })
+
+    await t.test('OPTIONS preflight asking for content-type returns 204', async () => {
+      const response = await fetch(`http://localhost:${port}/posts/1`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'http://example.com',
+          'Access-Control-Request-Method': 'PATCH',
+          'Access-Control-Request-Headers': 'content-type',
+        },
+      })
+      assert.equal(response.status, 204)
+      assert.match(response.headers.get('access-control-allow-headers') ?? '', /content-type/i)
+    })
+  })
 })
