@@ -5,6 +5,7 @@ import { Low, Memory } from 'lowdb'
 import type { JsonObject } from 'type-fest'
 
 import type { Data } from './service.ts'
+import { JsonPatchError } from './json-patch.ts'
 import { Service } from './service.ts'
 
 const defaultData = { posts: [], comments: [], object: {} }
@@ -156,6 +157,183 @@ await test('patchById', async () => {
 
   assert.equal(await service.patchById(UNKNOWN_RESOURCE, post1.id, post), undefined)
   assert.equal(await service.patchById(POSTS, UNKNOWN_ID, post), undefined)
+})
+
+await test('jsonPatch', async (t) => {
+  await t.test('patches an object resource and writes', async () => {
+    let writes = 0
+    const write = db.write
+    db.write = async () => {
+      writes++
+    }
+    try {
+      const res = await service.jsonPatch(OBJECT, [
+        { op: 'add', path: '/f2', value: 'bar' },
+        { op: 'replace', path: '/f1', value: 'baz' },
+      ])
+      assert.deepEqual(res, { f1: 'baz', f2: 'bar' })
+      assert.deepEqual(db.data[OBJECT], { f1: 'baz', f2: 'bar' })
+      assert.equal(writes, 1)
+    } finally {
+      db.write = write
+    }
+  })
+
+  await t.test('returns undefined for unknown resources and arrays', async () => {
+    const ops = [{ op: 'add', path: '/a', value: 1 }]
+    assert.equal(await service.jsonPatch(UNKNOWN_RESOURCE, ops), undefined)
+    assert.equal(await service.jsonPatch(POSTS, ops), undefined)
+  })
+
+  await t.test('is atomic and does not write on failure', async () => {
+    let writes = 0
+    const write = db.write
+    db.write = async () => {
+      writes++
+    }
+    const before = structuredClone(db.data)
+    const item = db.data[OBJECT]
+    try {
+      await assert.rejects(
+        service.jsonPatch(OBJECT, [
+          { op: 'add', path: '/f2', value: 'bar' },
+          { op: 'test', path: '/f1', value: 'nope' },
+        ]),
+        (e) => e instanceof JsonPatchError && e.kind === 'conflict',
+      )
+      await assert.rejects(
+        service.jsonPatch(OBJECT, { op: 'add' }),
+        (e) => e instanceof JsonPatchError && e.kind === 'invalid',
+      )
+      assert.equal(writes, 0)
+      assert.deepEqual(db.data, before)
+      assert.equal(db.data[OBJECT], item, 'should not replace the stored object')
+    } finally {
+      db.write = write
+    }
+  })
+
+  await t.test('rejects replacing or removing the root', async () => {
+    const before = structuredClone(db.data)
+    for (const ops of [
+      [{ op: 'replace', path: '', value: { x: 1 } }],
+      [{ op: 'replace', path: '', value: [] }],
+      [{ op: 'remove', path: '' }],
+      [{ op: 'copy', from: '/f1', path: '' }],
+    ]) {
+      await assert.rejects(
+        service.jsonPatch(OBJECT, ops),
+        (e) => e instanceof JsonPatchError && e.kind === 'conflict',
+      )
+    }
+    assert.deepEqual(db.data, before)
+  })
+})
+
+await test('jsonPatchById', async (t) => {
+  await t.test('patches an array item and writes', async () => {
+    let writes = 0
+    const write = db.write
+    db.write = async () => {
+      writes++
+    }
+    try {
+      const res = await service.jsonPatchById(POSTS, post1.id, [
+        { op: 'replace', path: '/title', value: 'updated' },
+        { op: 'add', path: '/tags/-', value: 'baz' },
+        { op: 'remove', path: '/author/name' },
+      ])
+      const expected = {
+        ...post1,
+        title: 'updated',
+        tags: ['foo', 'bar', 'baz'],
+        author: {},
+      }
+      assert.deepEqual(res, expected)
+      assert.deepEqual((db.data[POSTS] as unknown[])[0], expected)
+      assert.deepEqual((db.data[POSTS] as unknown[]).length, 3)
+      assert.equal(writes, 1)
+    } finally {
+      db.write = write
+    }
+  })
+
+  await t.test('returns undefined for unknown resource or id', async () => {
+    const ops = [{ op: 'add', path: '/a', value: 1 }]
+    assert.equal(await service.jsonPatchById(UNKNOWN_RESOURCE, post1.id, ops), undefined)
+    assert.equal(await service.jsonPatchById(POSTS, UNKNOWN_ID, ops), undefined)
+    assert.equal(await service.jsonPatchById(OBJECT, post1.id, ops), undefined)
+  })
+
+  await t.test('is atomic and does not write on failure', async () => {
+    let writes = 0
+    const write = db.write
+    db.write = async () => {
+      writes++
+    }
+    const before = structuredClone(db.data)
+    try {
+      await assert.rejects(
+        service.jsonPatchById(POSTS, post1.id, [
+          { op: 'replace', path: '/title', value: 'updated' },
+          { op: 'test', path: '/title', value: 'nope' },
+        ]),
+        (e) => e instanceof JsonPatchError && e.kind === 'conflict',
+      )
+      await assert.rejects(
+        service.jsonPatchById(POSTS, post1.id, [{ op: 'bogus', path: '/title' }]),
+        (e) => e instanceof JsonPatchError && e.kind === 'invalid',
+      )
+      assert.equal(writes, 0)
+      assert.deepEqual(db.data, before)
+    } finally {
+      db.write = write
+    }
+  })
+
+  await t.test('rejects the whole patch if an op changes the id', async () => {
+    let writes = 0
+    const write = db.write
+    db.write = async () => {
+      writes++
+    }
+    const before = structuredClone(db.data)
+    try {
+      for (const ops of [
+        [{ op: 'replace', path: '/id', value: 'x' }],
+        [{ op: 'replace', path: '/id', value: post1.id }],
+        [{ op: 'add', path: '/id', value: 'x' }],
+        [{ op: 'remove', path: '/id' }],
+        [{ op: 'move', from: '/id', path: '/other' }],
+        [{ op: 'copy', from: '/title', path: '/id' }],
+        [{ op: 'replace', path: '', value: { id: 'x', title: 'y' } }],
+        [
+          { op: 'replace', path: '/title', value: 'updated' },
+          { op: 'replace', path: '/id', value: 'x' },
+        ],
+      ]) {
+        await assert.rejects(
+          service.jsonPatchById(POSTS, post1.id, ops),
+          (e) => e instanceof JsonPatchError && e.kind === 'conflict',
+          JSON.stringify(ops),
+        )
+      }
+      assert.equal(writes, 0)
+      assert.deepEqual(db.data, before)
+      assert.equal(service.findById(POSTS, post1.id, {})?.['id'], post1.id)
+    } finally {
+      db.write = write
+    }
+  })
+
+  await t.test('allows read-only ops on the id', async () => {
+    const res = await service.jsonPatchById(POSTS, post1.id, [
+      { op: 'test', path: '/id', value: post1.id },
+      { op: 'copy', from: '/id', path: '/copyOfId' },
+    ])
+    assert.equal(res?.['id'], post1.id)
+    assert.equal(res?.['copyOfId'], post1.id)
+  })
 })
 
 await test('destroy', async (t) => {

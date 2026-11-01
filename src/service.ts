@@ -3,6 +3,7 @@ import { Low } from 'lowdb'
 import sortOn from 'sort-on'
 import type { JsonObject } from 'type-fest'
 
+import { applyJsonPatch, JsonPatchError } from './json-patch.ts'
 import { matchesWhere } from './matches-where.ts'
 import { paginate, type PaginationResult } from './paginate.ts'
 import { randomId } from './random-id.ts'
@@ -76,6 +77,27 @@ function deleteDependents(db: Low<Data>, name: string, dependents: string[]) {
       db.data[key] = items.filter((item) => item[foreignKey] !== null)
     }
   })
+}
+
+// Returns the pointers that an (already validated) patch document writes to:
+// the target of add/remove/replace/move/copy and the source of move. Read-only
+// uses (test, copy source) are not considered writes.
+function writtenPointers(ops: unknown): string[] {
+  if (!Array.isArray(ops)) return []
+  const pointers: string[] = []
+  for (const operation of ops as Record<string, unknown>[]) {
+    if (operation['op'] !== 'test' && typeof operation['path'] === 'string') {
+      pointers.push(operation['path'])
+    }
+    if (operation['op'] === 'move' && typeof operation['from'] === 'string') {
+      pointers.push(operation['from'])
+    }
+  }
+  return pointers
+}
+
+function touchesPointer(pointers: string[], target: string): boolean {
+  return pointers.some((pointer) => pointer === target || pointer.startsWith(`${target}/`))
 }
 
 export class Service {
@@ -176,6 +198,49 @@ export class Service {
     if (!item) return
 
     const nextItem = isPatch ? { ...item, ...body, id } : { ...body, id }
+    const index = items.indexOf(item)
+    items.splice(index, 1, nextItem)
+
+    await this.#db.write()
+    return nextItem
+  }
+
+  // Applies an RFC 6902 patch to an object resource. Returns undefined if the
+  // resource is missing or is an array. Throws JsonPatchError ('invalid' or
+  // 'conflict') and leaves data untouched (and unwritten) if the patch fails.
+  async jsonPatch(name: string, ops: unknown): Promise<Item | undefined> {
+    const item = this.#get(name)
+    if (item === undefined || Array.isArray(item)) return
+
+    const nextItem = applyJsonPatch(item, ops)
+
+    // The root of an object resource can't be replaced or removed
+    if (!isItem(nextItem) || writtenPointers(ops).includes('')) {
+      throw new JsonPatchError('conflict', 'Cannot replace or remove the root of the resource')
+    }
+
+    this.#db.data[name] = nextItem
+
+    await this.#db.write()
+    return nextItem
+  }
+
+  // Applies an RFC 6902 patch to an item of an array resource. Returns
+  // undefined if the resource or item is missing. The item's id can't be
+  // changed: a patch that writes to /id is rejected as a whole.
+  async jsonPatchById(name: string, id: string, ops: unknown): Promise<Item | undefined> {
+    const items = this.#get(name)
+    if (items === undefined || !Array.isArray(items)) return
+
+    const item = items.find((item) => item['id'] === id)
+    if (!item) return
+
+    const nextItem = applyJsonPatch(item, ops)
+
+    if (touchesPointer(writtenPointers(ops), '/id') || !isItem(nextItem) || nextItem['id'] !== id) {
+      throw new JsonPatchError('conflict', 'Cannot change the id of an item')
+    }
+
     const index = items.indexOf(item)
     items.splice(index, 1, nextItem)
 
