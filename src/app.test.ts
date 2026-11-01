@@ -179,4 +179,133 @@ await test('createApp', async (t) => {
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
+
+  await t.test('JSON Patch', async (t) => {
+    const reset = () => {
+      db.data = {
+        posts: [{ id: '1', title: 'foo', tags: ['a', 'b'] }],
+        comments: [{ id: '1', postId: '1' }],
+        object: { f1: 'foo' },
+      }
+    }
+    const patch = (url: string, body: unknown, contentType = 'application/json-patch+json') =>
+      fetch(`http://localhost:${port}${url}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': contentType },
+        body: JSON.stringify(body),
+      })
+
+    await t.test('applies a JSON Patch with application/json-patch+json', async () => {
+      reset()
+      const response = await patch('/posts/1', [
+        { op: 'test', path: '/title', value: 'foo' },
+        { op: 'replace', path: '/title', value: 'bar' },
+        { op: 'add', path: '/tags/-', value: 'c' },
+        { op: 'remove', path: '/tags/0' },
+        { op: 'copy', from: '/title', path: '/subtitle' },
+        { op: 'move', from: '/subtitle', path: '/summary' },
+      ])
+      assert.equal(response.status, 200)
+      const expected = { id: '1', title: 'bar', tags: ['b', 'c'], summary: 'bar' }
+      assert.deepEqual(await response.json(), expected)
+      assert.deepEqual(db.data['posts'], [expected])
+
+      const get = await fetch(`http://localhost:${port}/posts/1`)
+      assert.deepEqual(await get.json(), expected)
+    })
+
+    await t.test('accepts content type parameters', async () => {
+      reset()
+      const response = await patch(
+        '/posts/1',
+        [{ op: 'replace', path: '/title', value: 'bar' }],
+        'application/json-patch+json; charset=utf-8',
+      )
+      assert.equal(response.status, 200)
+      assert.equal((db.data['posts'] as any[])[0].title, 'bar')
+    })
+
+    await t.test('keeps the id unchanged', async () => {
+      reset()
+      const response = await patch('/posts/1', [{ op: 'replace', path: '/id', value: '2' }])
+      assert.equal(response.status, 200)
+      assert.equal((db.data['posts'] as any[])[0].id, '1')
+    })
+
+    await t.test('application/json still merges', async () => {
+      reset()
+      const response = await patch('/posts/1', { title: 'baz' }, 'application/json')
+      assert.equal(response.status, 200)
+      const expected = { id: '1', title: 'baz', tags: ['a', 'b'] }
+      assert.deepEqual(await response.json(), expected)
+      assert.deepEqual(db.data['posts'], [expected])
+    })
+
+    await t.test('application/json with an array body still returns 400', async () => {
+      reset()
+      const response = await patch(
+        '/posts/1',
+        [{ op: 'replace', path: '/title', value: 'bar' }],
+        'application/json',
+      )
+      assert.equal(response.status, 400)
+      assert.deepEqual(await response.json(), { error: 'Body must be a JSON object' })
+    })
+
+    await t.test('a JSON object body is not a valid JSON Patch (422)', async () => {
+      reset()
+      const response = await patch('/posts/1', { title: 'baz' })
+      assert.equal(response.status, 422)
+      assert.equal(typeof ((await response.json()) as any).error, 'string')
+      assert.equal((db.data['posts'] as any[])[0].title, 'foo')
+    })
+
+    const invalid: [string, unknown][] = [
+      ['unknown op', [{ op: 'nope', path: '/title' }]],
+      ['missing path', [{ op: 'remove' }]],
+      ['missing value', [{ op: 'add', path: '/title' }]],
+      ['operation is not an object', ['add']],
+      ['path not found', [{ op: 'remove', path: '/missing' }]],
+      ['array index out of bounds', [{ op: 'add', path: '/tags/5', value: 'x' }]],
+      ['failed test', [{ op: 'test', path: '/title', value: 'other' }]],
+      [
+        'failed test after a successful operation',
+        [
+          { op: 'replace', path: '/title', value: 'changed' },
+          { op: 'test', path: '/title', value: 'other' },
+        ],
+      ],
+      [
+        'failing operation after a successful one',
+        [
+          { op: 'replace', path: '/title', value: 'changed' },
+          { op: 'remove', path: '/missing' },
+        ],
+      ],
+      ['non-object result', [{ op: 'replace', path: '', value: 'x' }]],
+    ]
+
+    for (const [name, doc] of invalid) {
+      await t.test(`${name} returns 422 and changes nothing`, async () => {
+        reset()
+        const before = structuredClone(db.data)
+        const response = await patch('/posts/1', doc)
+        assert.equal(response.status, 422)
+        const body = (await response.json()) as any
+        assert.equal(typeof body.error, 'string')
+        assert.ok(body.error.length > 0)
+        assert.deepEqual(db.data, before)
+      })
+    }
+
+    await t.test('missing item returns 404', async () => {
+      reset()
+      const doc = [{ op: 'replace', path: '/title', value: 'bar' }]
+      for (const url of ['/posts/-1', '/not-found/1', '/object/1']) {
+        const response = await patch(url, doc)
+        assert.equal(response.status, 404, url)
+        assert.deepEqual(await response.json(), { error: 'Not Found' })
+      }
+    })
+  })
 })

@@ -3,6 +3,7 @@ import { Low } from 'lowdb'
 import sortOn from 'sort-on'
 import type { JsonObject } from 'type-fest'
 
+import { applyJsonPatch, JsonPatchError, type Json } from './json-patch.ts'
 import { matchesWhere } from './matches-where.ts'
 import { paginate, type PaginationResult } from './paginate.ts'
 import { randomId } from './random-id.ts'
@@ -197,6 +198,28 @@ export class Service {
 
   async patchById(name: string, id: string, body: Item = {}): Promise<Item | undefined> {
     return this.#updateOrPatchById(name, id, body, true)
+  }
+
+  // Applies an RFC 6902 JSON Patch document to an item. Throws JsonPatchError if the
+  // document is invalid or an operation fails; the stored item is then left unchanged.
+  async jsonPatchById(name: string, id: string, patch: unknown): Promise<Item | undefined> {
+    const items = this.#get(name)
+    if (items === undefined || !Array.isArray(items)) return
+
+    const item = items.find((item) => item['id'] === id)
+    if (!item) return
+
+    const patched = applyJsonPatch(item as Json, patch)
+    if (!isItem(patched)) {
+      throw new JsonPatchError('patched item must be a JSON object')
+    }
+
+    // Like merge patch, the id can't be changed
+    const nextItem = { ...patched, id }
+    items.splice(items.indexOf(item), 1, nextItem)
+
+    await this.#db.write()
+    return nextItem
   }
 
   async destroyById(

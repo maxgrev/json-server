@@ -8,6 +8,7 @@ import { Low } from 'lowdb'
 import { json } from 'milliparsec'
 import sirv from 'sirv'
 
+import { JsonPatchError } from './json-patch.ts'
 import { parseWhere } from './parse-where.ts'
 import type { Data } from './service.ts'
 import { isItem, Service } from './service.ts'
@@ -91,6 +92,36 @@ function withIdAndBody(
   }
 }
 
+const JSON_PATCH_CONTENT_TYPE = 'application/json-patch+json'
+
+function isJsonPatchRequest(req: any): boolean {
+  const contentType = req.headers['content-type']
+  if (typeof contentType !== 'string') return false
+  return contentType.split(';')[0]?.trim().toLowerCase() === JSON_PATCH_CONTENT_TYPE
+}
+
+function patchByIdHandler(service: Service) {
+  const mergePatch = withIdAndBody(service.patchById.bind(service))
+
+  return async (req: any, res: any, next: any) => {
+    if (!isJsonPatchRequest(req)) {
+      return mergePatch(req, res, next)
+    }
+
+    const { name = '', id = '' } = req.params
+    try {
+      res.locals['data'] = await service.jsonPatchById(name, id, req.body)
+    } catch (error) {
+      if (error instanceof JsonPatchError) {
+        res.status(422).json({ error: error.message })
+        return
+      }
+      throw error
+    }
+    next?.()
+  }
+}
+
 export function createApp(db: Low<Data>, options: AppOptions = {}) {
   // Create service
   const service = new Service(db)
@@ -148,7 +179,7 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   app.patch('/:name', withBody(service.patch.bind(service)))
 
-  app.patch('/:name/:id', withIdAndBody(service.patchById.bind(service)))
+  app.patch('/:name/:id', patchByIdHandler(service))
 
   app.delete('/:name/:id', async (req, res, next) => {
     const { name = '', id = '' } = req.params
