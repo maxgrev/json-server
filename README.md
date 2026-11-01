@@ -86,7 +86,19 @@ curl http://localhost:3000/posts/1
 }
 ```
 
-Run `json-server --help` for a list of options
+Run `json-server --help` for a list of options:
+
+```
+Usage: json-server [options] <file>
+
+Options:
+  -p, --port <port>  Port (default: 3000)
+  -h, --host <host>  Host (default: localhost)
+  -s, --static <dir> Static files directory (multiple allowed)
+  --delay <ms>       Delay each response by the given number of milliseconds (default: 0)
+  --help             Show this message
+  --version          Show version number
+```
 
 ## Sponsors ✨
 
@@ -251,6 +263,16 @@ json-server db.json -s ./static -s ./node_modules
 
 Static files are served with standard MIME types and can include HTML, CSS, JavaScript, images, and other assets.
 
+## Delay
+
+Use `--delay <ms>` to simulate a slow API. JSON Server waits the given number of milliseconds before answering each request.
+
+```bash
+json-server db.json --delay 1000
+```
+
+With this example, every response takes at least 1 second. There is no delay by default. A negative or non-numeric value is rejected with an error.
+
 ## Migration Notes (v0 → v1)
 
 If you are upgrading from json-server v0.x, note these behavioral changes:
@@ -258,6 +280,6 @@ If you are upgrading from json-server v0.x, note these behavioral changes:
 - **ID handling:** `id` is always a string and will be auto-generated if not provided
 - **Pagination:** Use `_per_page` with `_page` instead of the deprecated `_limit` parameter
 - **Relationships:** Use `_embed` instead of `_expand` for including related resources
-- **Request delays:** Use browser DevTools (Network tab > throttling) instead of the removed `--delay` CLI option
+- **Request delays:** The `--delay <ms>` CLI option is supported (see [Delay](#delay)). You can also use browser DevTools (Network tab > throttling)
 
 > **New to json-server?** These notes are for users migrating from v0. If this is your first time using json-server, you can ignore this section.
