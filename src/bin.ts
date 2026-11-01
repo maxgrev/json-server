@@ -25,6 +25,7 @@ Options:
   -p, --port <port>  Port (default: 3000)
   -h, --host <host>  Host (default: localhost)
   -s, --static <dir> Static files directory (multiple allowed)
+  --delay <ms>       Wait <ms> milliseconds before answering each request
   --help             Show this message
   --version          Show version number
 `);
@@ -36,6 +37,7 @@ function args(): {
   port: number;
   host: string;
   static: string[];
+  delay: number;
 } {
   try {
     const { values, positionals } = parseArgs({
@@ -55,6 +57,9 @@ function args(): {
           short: "s",
           multiple: true,
           default: [],
+        },
+        delay: {
+          type: "string",
         },
         help: {
           type: "boolean",
@@ -94,16 +99,36 @@ function args(): {
       process.exit();
     }
 
+    // --delay
+    let delay = 0;
+    if (values.delay !== undefined) {
+      delay = Number(values.delay);
+      if (values.delay.trim() === "" || !Number.isFinite(delay) || delay < 0) {
+        console.log(
+          chalk.red(
+            `Invalid value for --delay: '${values.delay}'. Expected a non-negative number of milliseconds`,
+          ),
+        );
+        process.exit(1);
+      }
+    }
+
     // App args and options
     return {
       file: positionals[0] ?? "",
       port: parseInt(values.port as string),
       host: values.host as string,
       static: values.static as string[],
+      delay,
     };
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
       console.log(chalk.red((e as NodeJS.ErrnoException).message.split(".")[0]));
+      help();
+      process.exit(1);
+    } else if ((e as NodeJS.ErrnoException).code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE") {
+      // e.g. --delay -1 or a missing option value
+      console.log(chalk.red((e as NodeJS.ErrnoException).message.split(". ")[0]));
       help();
       process.exit(1);
     } else {
@@ -112,7 +137,7 @@ function args(): {
   }
 }
 
-const { file, port, host, static: staticArr } = args();
+const { file, port, host, static: staticArr, delay } = args();
 
 if (!existsSync(file)) {
   console.log(chalk.red(`File ${file} not found`));
@@ -140,7 +165,7 @@ const db = new Low<Data>(observer, {});
 await db.read();
 
 // Create app
-const app = createApp(db, { logger: false, static: staticArr });
+const app = createApp(db, { logger: false, static: staticArr, delay });
 
 function logRoutes(data: Data) {
   console.log(chalk.bold("Endpoints:"));

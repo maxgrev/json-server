@@ -18,6 +18,7 @@ const isProduction = process.env['NODE_ENV'] === 'production'
 export type AppOptions = {
   logger?: boolean
   static?: string[]
+  delay?: number
 }
 
 const eta = new Eta({
@@ -97,6 +98,14 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   // Create app
   const app = new App()
+
+  // Delay
+  const delay = options.delay ?? 0
+  if (delay > 0) {
+    app.use((_req, _res, next) => {
+      setTimeout(() => next?.(), delay)
+    })
+  }
 
   // Static files
   app.use(sirv('public', { dev: !isProduction }))
