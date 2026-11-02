@@ -16,6 +16,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const isProduction = process.env['NODE_ENV'] === 'production'
 
 export type AppOptions = {
+  delay?: number
   logger?: boolean
   static?: string[]
 }
@@ -97,6 +98,14 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   // Create app
   const app = new App()
+
+  // Delay every response (must be registered first)
+  const { delay } = options
+  if (typeof delay === 'number' && delay > 0) {
+    app.use((_req, _res, next) => {
+      setTimeout(() => next?.(), delay)
+    })
+  }
 
   // Static files
   app.use(sirv('public', { dev: !isProduction }))

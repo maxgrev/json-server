@@ -1,5 +1,6 @@
    import assert from 'node:assert/strict'
 import { writeFileSync } from 'node:fs'
+import type { Server } from 'node:http'
 import { join } from 'node:path'
 import test from 'node:test'
 
@@ -179,4 +180,78 @@ await test('createApp', async (t) => {
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
+})
+
+await test('createApp with delay', async (t) => {
+  const DELAY = 200
+  // Allow for timer jitter (timers can fire slightly early relative to Date.now)
+  const TOLERANCE = 20
+
+  const delayedPort = await getPort()
+  const delayedDb = new Low<Data>(new Memory<Data>(), {})
+  delayedDb.data = { posts: [{ id: '1', title: 'foo' }] }
+  const delayedApp = createApp(delayedDb, { delay: DELAY, static: [tmpDir] })
+  const delayedServer = await new Promise<Server>((resolve) => {
+    const server = delayedApp.listen(delayedPort, () => resolve(server))
+  })
+  t.after(() => delayedServer.close())
+
+  const cases: Omit<Test, 'statusCode'>[] = [
+    { method: 'GET', url: '/posts' },
+    { method: 'GET', url: `/${file}` },
+    { method: 'GET', url: '/' },
+    { method: 'OPTIONS', url: '/posts' },
+    { method: 'GET', url: '/not-found' },
+  ]
+
+  for (const tc of cases) {
+    await t.test(`${tc.method} ${tc.url} is delayed`, async () => {
+      const start = performance.now()
+      const response = await fetch(`http://localhost:${delayedPort}${tc.url}`, {
+        method: tc.method,
+      })
+      await response.arrayBuffer()
+      const elapsed = performance.now() - start
+      assert.ok(elapsed >= DELAY - TOLERANCE, `elapsed ${elapsed}ms < ${DELAY - TOLERANCE}ms`)
+    })
+  }
+
+  await t.test('delayed app keeps the same status codes', async () => {
+    const ok = await fetch(`http://localhost:${delayedPort}/posts`)
+    assert.equal(ok.status, 200)
+    await ok.arrayBuffer()
+    const notFound = await fetch(`http://localhost:${delayedPort}/not-found`)
+    assert.equal(notFound.status, 404)
+    assert.deepEqual(await notFound.json(), { error: 'Not Found' })
+  })
+})
+
+await test('createApp without delay', async (t) => {
+  for (const delay of [undefined, 0]) {
+    await t.test(`delay: ${delay} does not delay or change status codes`, async () => {
+      const noDelayPort = await getPort()
+      const noDelayDb = new Low<Data>(new Memory<Data>(), {})
+      noDelayDb.data = { posts: [{ id: '1', title: 'foo' }] }
+      const noDelayApp = createApp(noDelayDb, delay === undefined ? {} : { delay })
+      const server = await new Promise<Server>((resolve) => {
+        const s = noDelayApp.listen(noDelayPort, () => resolve(s))
+      })
+      try {
+        const start = performance.now()
+        const ok = await fetch(`http://localhost:${noDelayPort}/posts`)
+        assert.equal(ok.status, 200)
+        await ok.arrayBuffer()
+        const notFound = await fetch(`http://localhost:${noDelayPort}/not-found`)
+        assert.equal(notFound.status, 404)
+        await notFound.arrayBuffer()
+        const preflight = await fetch(`http://localhost:${noDelayPort}/posts`, {
+          method: 'OPTIONS',
+        })
+        assert.equal(preflight.status, 204)
+        assert.ok(performance.now() - start < 1000)
+      } finally {
+        server.close()
+      }
+    })
+  }
 })
