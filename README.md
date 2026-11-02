@@ -251,6 +251,16 @@ json-server db.json -s ./static -s ./node_modules
 
 Static files are served with standard MIME types and can include HTML, CSS, JavaScript, images, and other assets.
 
+## Delaying responses
+
+Use `--delay <ms>` to hold every response for the given number of milliseconds, for example to simulate a slow network:
+
+```bash
+json-server db.json --delay 500
+```
+
+`<ms>` must be a non-negative integer. The delay applies to all responses, including static files, the index page, CORS preflight (`OPTIONS`) requests and 404s. When the option is omitted (or set to `0`), responses are not delayed.
+
 ## Migration Notes (v0 → v1)
 
 If you are upgrading from json-server v0.x, note these behavioral changes:
@@ -258,6 +268,6 @@ If you are upgrading from json-server v0.x, note these behavioral changes:
 - **ID handling:** `id` is always a string and will be auto-generated if not provided
 - **Pagination:** Use `_per_page` with `_page` instead of the deprecated `_limit` parameter
 - **Relationships:** Use `_embed` instead of `_expand` for including related resources
-- **Request delays:** Use browser DevTools (Network tab > throttling) instead of the removed `--delay` CLI option
+- **Request delays:** The `--delay <ms>` CLI option is supported again, see [Delaying responses](#delaying-responses)
 
 > **New to json-server?** These notes are for users migrating from v0. If this is your first time using json-server, you can ignore this section.
