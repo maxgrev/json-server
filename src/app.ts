@@ -141,7 +141,9 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
   // Body parser
   app.use(json())
 
-  app.get('/', (_req, res) => res.send(eta.render('index.html', { data: db.data })))
+  app.get('/', (_req, res) =>
+    res.send(eta.render('index.html', { data: db.data, readOnly: options.readOnly === true })),
+  )
 
   app.get('/:name', (req, res, next) => {
     const { name = '' } = req.params

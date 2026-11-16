@@ -82,6 +82,12 @@
       .empty {
         color: var(--muted);
       }
+      .notice {
+        margin-bottom: 40px;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
       footer {
         margin-top: 48px;
         padding-top: 12px;
@@ -120,6 +126,12 @@
       </div>
       <div class="intro">Available REST resources from db.json.</div>
     </header>
+
+    <% if (it.readOnly) { %>
+    <div class="notice">
+      This server is read-only. POST, PUT, PATCH and DELETE requests return 405.
+    </div>
+    <% } %>
 
     <div class="section-title">Resources</div>
 
