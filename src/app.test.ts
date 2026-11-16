@@ -1,10 +1,11 @@
    import assert from 'node:assert/strict'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
 
 import getPort from 'get-port'
 import { Low, Memory } from 'lowdb'
+import { JSONFile } from 'lowdb/node'
 import { temporaryDirectory } from 'tempy'
 
 import { createApp } from './app.ts'
@@ -178,5 +179,81 @@ await test('createApp', async (t) => {
     assert.equal(response.status, 400)
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
+  })
+})
+
+await test('createApp with readOnly', async (t) => {
+  const readOnlyPort = await getPort()
+  const dbFile = join(temporaryDirectory(), 'db.json')
+  const initial = JSON.stringify({
+    posts: [{ id: '1', title: 'foo' }],
+    comments: [{ id: '1', postId: '1' }],
+    object: { f1: 'foo' },
+  })
+  writeFileSync(dbFile, initial)
+
+  const readOnlyDb = new Low<Data>(new JSONFile<Data>(dbFile), {})
+  await readOnlyDb.read()
+  const readOnlyApp = createApp(readOnlyDb, { readOnly: true })
+
+  await new Promise<void>((resolve) => {
+    const server = readOnlyApp.listen(readOnlyPort, () => resolve())
+    t.after(() => server.close())
+  })
+
+  const base = `http://localhost:${readOnlyPort}`
+  const urls = ['/', '/posts', '/posts/1', '/object', '/object/1', '/not-found']
+  const writeMethods: HTTPMethods[] = ['POST', 'PUT', 'PATCH', 'DELETE']
+
+  for (const method of writeMethods) {
+    for (const url of urls) {
+      await t.test(`${method} ${url} returns 405`, async () => {
+        const response = await fetch(`${base}${url}`, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'bar' }),
+        })
+        assert.equal(response.status, 405)
+        assert.equal(response.headers.get('allow'), 'GET, HEAD, OPTIONS')
+        assert.deepEqual(await response.json(), { error: 'This server is read-only' })
+        assert.equal(readFileSync(dbFile, 'utf-8'), initial)
+        assert.deepEqual(readOnlyDb.data, JSON.parse(initial))
+      })
+    }
+  }
+
+  await t.test('DELETE /posts/1?_dependent=comments returns 405', async () => {
+    const response = await fetch(`${base}/posts/1?_dependent=comments`, {
+      method: 'DELETE',
+    })
+    assert.equal(response.status, 405)
+    assert.equal(readFileSync(dbFile, 'utf-8'), initial)
+  })
+
+  const readTests: Test[] = [
+    { method: 'GET', url: '/', statusCode: 200 },
+    { method: 'GET', url: '/posts', statusCode: 200 },
+    { method: 'GET', url: '/posts/1', statusCode: 200 },
+    { method: 'GET', url: '/not-found', statusCode: 404 },
+    { method: 'HEAD', url: '/', statusCode: 200 },
+    { method: 'OPTIONS', url: '/posts', statusCode: 204 },
+  ]
+
+  for (const tc of readTests) {
+    await t.test(`${tc.method} ${tc.url} still works`, async () => {
+      const response = await fetch(`${base}${tc.url}`, { method: tc.method })
+      assert.equal(response.status, tc.statusCode)
+    })
+  }
+
+  await t.test('405 response carries CORS headers', async () => {
+    const response = await fetch(`${base}/posts`, { method: 'POST' })
+    assert.equal(response.status, 405)
+    assert.equal(response.headers.get('access-control-allow-origin'), '*')
+  })
+
+  await t.test('POST on a static file returns 405', async () => {
+    const response = await fetch(`${base}/test.html`, { method: 'POST' })
+    assert.equal(response.status, 405)
   })
 })

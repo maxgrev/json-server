@@ -2,6 +2,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { App } from '@tinyhttp/app'
+import type { NextFunction, Request, Response } from '@tinyhttp/app'
 import { cors } from '@tinyhttp/cors'
 import { Eta } from 'eta'
 import { Low } from 'lowdb'
@@ -17,6 +18,7 @@ const isProduction = process.env['NODE_ENV'] === 'production'
 
 export type AppOptions = {
   logger?: boolean
+  readOnly?: boolean
   static?: string[]
 }
 
@@ -24,6 +26,8 @@ const eta = new Eta({
   views: join(__dirname, '../views'),
   cache: isProduction,
 })
+
+const READ_ONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
 const RESERVED_QUERY_KEYS = new Set(['_sort', '_page', '_per_page', '_embed', '_where'])
 
@@ -98,6 +102,33 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
   // Create app
   const app = new App()
 
+  // CORS middleware, echoing back the headers the client asks for
+  const corsMiddleware = (req: Request, res: Response, next?: NextFunction) => {
+    return cors({
+      allowedHeaders: req.headers['access-control-request-headers']
+        ?.split(',')
+        .map((h) => h.trim()),
+    })(req, res, next)
+  }
+
+  // Read-only mode: refuse every write before static files, the body parser
+  // or a route can handle it. CORS headers are still set so browsers can read
+  // the error.
+  if (options.readOnly) {
+    app.use((req, res, next) => {
+      if (READ_ONLY_METHODS.has(req.method ?? '')) {
+        next?.()
+        return
+      }
+      corsMiddleware(req, res, () => {
+        res
+          .status(405)
+          .set('Allow', 'GET, HEAD, OPTIONS')
+          .json({ error: 'This server is read-only' })
+      })
+    })
+  }
+
   // Static files
   app.use(sirv('public', { dev: !isProduction }))
   options.static
@@ -105,15 +136,7 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
     .forEach((dir) => app.use(sirv(dir, { dev: !isProduction })))
 
   // CORS
-  app
-    .use((req, res, next) => {
-      return cors({
-        allowedHeaders: req.headers['access-control-request-headers']
-          ?.split(',')
-          .map((h) => h.trim()),
-      })(req, res, next)
-    })
-    .options('*', cors())
+  app.use(corsMiddleware).options('*', cors())
 
   // Body parser
   app.use(json())
