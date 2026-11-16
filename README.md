@@ -131,6 +131,14 @@ See detailed documentation below for each feature.
 
 ## Routes
 
+### Homepage
+
+Serves an HTML page that lists the resources.
+
+```http
+GET /
+```
+
 ### Array Resources
 
 For array resources like `posts` and `comments`:
