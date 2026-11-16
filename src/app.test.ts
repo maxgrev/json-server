@@ -147,6 +147,44 @@ await test('createApp', async (t) => {
     assert.deepEqual(data, [{ id: '1', title: 'foo' }])
   })
 
+  await t.test('GET /posts paginates when _page or _per_page is present', async () => {
+    db.data = {
+      posts: Array.from({ length: 12 }, (_, i) => ({ id: String(i + 1), title: `post ${i + 1}` })),
+    }
+    const get = async (query: string) => {
+      const response = await fetch(`http://localhost:${port}/posts${query}`)
+      assert.equal(response.status, 200)
+      return response.json() as Promise<any>
+    }
+
+    // _per_page alone starts at page 1
+    let body = await get('?_per_page=5')
+    assert.equal(body.data.length, 5)
+    assert.equal(body.pages, 3)
+    assert.equal(body.next, 2)
+    assert.equal(body.prev, null)
+
+    // _page alone uses a page size of 10
+    body = await get('?_page=2')
+    assert.equal(body.data.length, 2)
+    assert.equal(body.prev, 1)
+    assert.equal(body.items, 12)
+
+    // Non-numeric values are normalized by paginate()
+    body = await get('?_page=abc')
+    assert.equal(body.first, 1)
+    assert.equal(body.prev, null)
+    assert.equal(body.data.length, 10)
+
+    body = await get('?_per_page=abc')
+    assert.equal(body.data.length, 1)
+
+    // No params returns a plain array
+    const all = await get('')
+    assert.ok(Array.isArray(all))
+    assert.equal(all.length, 12)
+  })
+
   await t.test('POST /posts with array body returns 400', async () => {
     const response = await fetch(`http://localhost:${port}/posts`, {
       method: 'POST',
