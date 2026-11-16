@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -7,12 +7,13 @@ import { fileURLToPath } from 'node:url'
 const binPath = fileURLToPath(new URL('./bin.ts', import.meta.url))
 const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
 
-await test('--version prints the version from package.json', () => {
+await test('--version prints the version from package.json and exits 0', () => {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
-  const stdout = execFileSync(
+  const result = spawnSync(
     process.execPath,
     ['--experimental-strip-types', binPath, '--version'],
     { encoding: 'utf-8' },
   )
-  assert.equal(stdout.trim(), pkg.version)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stdout.trim(), pkg.version)
 })
