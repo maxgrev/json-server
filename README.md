@@ -261,3 +261,4 @@ If you are upgrading from json-server v0.x, note these behavioral changes:
 - **Request delays:** Use browser DevTools (Network tab > throttling) instead of the removed `--delay` CLI option
 
 > **New to json-server?** These notes are for users migrating from v0. If this is your first time using json-server, you can ignore this section.
+tried on 2026-11-15 (run 1)
