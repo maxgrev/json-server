@@ -120,6 +120,8 @@ export function createApp(db: Low<Data>, options: AppOptions = {}) {
 
   app.get('/', (_req, res) => res.send(eta.render('index.html', { data: db.data })))
 
+  app.get('/__health', (_req, res) => res.json({ ok: true }))
+
   app.get('/:name', (req, res, next) => {
     const { name = '' } = req.params
     const { where, sort, page, perPage, embed } = parseListParams(req)

@@ -123,6 +123,20 @@ await test('createApp', async (t) => {
     })
   }
 
+  await t.test('GET /__health returns ok', async () => {
+    const response = await fetch(`http://localhost:${port}/__health`)
+    assert.equal(response.status, 200)
+    const data = await response.json()
+    assert.deepEqual(data, { ok: true })
+  })
+
+  await t.test('GET /does-not-exist still returns 404', async () => {
+    const response = await fetch(`http://localhost:${port}/does-not-exist`)
+    assert.equal(response.status, 404)
+    const data = await response.json()
+    assert.deepEqual(data, { error: 'Not Found' })
+  })
+
   await t.test('GET /posts?_where=... uses JSON query', async () => {
     // Reset data since previous tests may have modified it
     db.data = {
