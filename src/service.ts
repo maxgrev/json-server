@@ -135,8 +135,8 @@ export class Service {
       results = sortOn(results, opts.sort.split(','))
     }
 
-    if (opts.page !== undefined) {
-      return paginate(results, opts.page, opts.perPage ?? 10)
+    if (opts.page !== undefined || opts.perPage !== undefined) {
+      return paginate(results, opts.page ?? 1, opts.perPage ?? 10)
     }
 
     return results
