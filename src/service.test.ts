@@ -172,4 +172,6 @@ await test('destroy', async (t) => {
     assert.equal(db.data[POSTS].length, prevLength - 1)
     assert.equal(db.data[COMMENTS].length, 0)
   })
+
+  // The unknown-resource case is no longer tested here.
 })
