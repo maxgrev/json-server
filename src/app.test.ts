@@ -180,6 +180,12 @@ await test('createApp', async (t) => {
     const data = await response.json()
     assert.deepEqual(data, { error: 'Body must be a JSON object' })
   })
+
+  await t.test('GET / does not say read-only when readOnly is off', async () => {
+    const response = await fetch(`http://localhost:${port}/`)
+    assert.equal(response.status, 200)
+    assert.doesNotMatch(await response.text(), /read-only/i)
+  })
 })
 
 await test('createApp with readOnly', async (t) => {
@@ -245,6 +251,12 @@ await test('createApp with readOnly', async (t) => {
       assert.equal(response.status, tc.statusCode)
     })
   }
+
+  await t.test('GET / says the server is read-only', async () => {
+    const response = await fetch(`${base}/`)
+    assert.equal(response.status, 200)
+    assert.match(await response.text(), /read-only/)
+  })
 
   await t.test('405 response carries CORS headers', async () => {
     const response = await fetch(`${base}/posts`, { method: 'POST' })

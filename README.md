@@ -251,6 +251,30 @@ json-server db.json -s ./static -s ./node_modules
 
 Static files are served with standard MIME types and can include HTML, CSS, JavaScript, images, and other assets.
 
+## Read-only mode
+
+Start the server with `--read-only` to refuse every write:
+
+```bash
+json-server db.json --read-only
+```
+
+`GET`, `HEAD` and `OPTIONS` requests work as usual. `POST`, `PUT`, `PATCH` and `DELETE` requests are answered with `405 Method Not Allowed`, and `db.json` is never changed:
+
+```bash
+curl -i -X POST http://localhost:3000/posts -H 'Content-Type: application/json' -d '{"title": "nope"}'
+```
+
+```http
+HTTP/1.1 405 Method Not Allowed
+Allow: GET, HEAD, OPTIONS
+Content-Type: application/json
+
+{ "error": "This server is read-only" }
+```
+
+The index page at `http://localhost:3000/` also says that the server is read-only.
+
 ## Migration Notes (v0 → v1)
 
 If you are upgrading from json-server v0.x, note these behavioral changes:
