@@ -251,6 +251,10 @@ json-server db.json -s ./static -s ./node_modules
 
 Static files are served with standard MIME types and can include HTML, CSS, JavaScript, images, and other assets.
 
+## Development
+
+Run the tests with `npm test` (runs `node --experimental-strip-types --test src/*.test.ts`).
+
 ## Migration Notes (v0 → v1)
 
 If you are upgrading from json-server v0.x, note these behavioral changes:
