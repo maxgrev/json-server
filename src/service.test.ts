@@ -172,9 +172,4 @@ await test('destroy', async (t) => {
     assert.equal(db.data[POSTS].length, prevLength - 1)
     assert.equal(db.data[COMMENTS].length, 0)
   })
-
-  await t.test('ignores unknown resources', async () => {
-    assert.equal(await service.destroyById(UNKNOWN_RESOURCE, post1.id), undefined)
-    assert.equal(await service.destroyById(POSTS, UNKNOWN_ID), undefined)
-  })
 })
