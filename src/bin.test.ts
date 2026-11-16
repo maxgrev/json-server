@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const binPath = fileURLToPath(new URL('./bin.ts', import.meta.url))
 const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
 
-await test('--version prints the version from package.json and exits 0', () => {
+await test('--version reads package.json, prints its version and exits 0', () => {
   const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version: string }
   const result = spawnSync(
     process.execPath,
