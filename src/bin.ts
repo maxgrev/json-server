@@ -115,8 +115,8 @@ function args(): {
 const { file, port, host, static: staticArr } = args();
 
 if (!existsSync(file)) {
-  console.log(chalk.red(`File ${file} not found`));
-  process.exit(1);
+  console.error(chalk.red(`Error: database file ${file} not found`));
+  process.exit(2);
 }
 
 // Handle empty string JSON file
