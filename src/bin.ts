@@ -94,10 +94,18 @@ function args(): {
       process.exit();
     }
 
+    // Validate port
+    const portStr = values.port as string;
+    const port = /^\d+$/.test(portStr) ? Number(portStr) : NaN;
+    if (!(port >= 0 && port <= 65535)) {
+      console.error(`Error: invalid port "${portStr}", must be a number between 0 and 65535`);
+      process.exit(2);
+    }
+
     // App args and options
     return {
       file: positionals[0] ?? "",
-      port: parseInt(values.port as string),
+      port,
       host: values.host as string,
       static: values.static as string[],
     };
