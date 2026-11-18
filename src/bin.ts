@@ -94,10 +94,19 @@ function args(): {
       process.exit();
     }
 
+    // Validate port
+    const portStr = values.port as string;
+    if (!/^\d+$/.test(portStr) || Number(portStr) > 65535) {
+      console.error(
+        chalk.red(`Invalid port "${portStr}": must be a number between 0 and 65535`),
+      );
+      process.exit(2);
+    }
+
     // App args and options
     return {
       file: positionals[0] ?? "",
-      port: parseInt(values.port as string),
+      port: Number(portStr),
       host: values.host as string,
       static: values.static as string[],
     };
@@ -115,8 +124,8 @@ function args(): {
 const { file, port, host, static: staticArr } = args();
 
 if (!existsSync(file)) {
-  console.log(chalk.red(`File ${file} not found`));
-  process.exit(1);
+  console.error(chalk.red(`File ${file} not found`));
+  process.exit(2);
 }
 
 // Handle empty string JSON file
