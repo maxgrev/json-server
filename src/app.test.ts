@@ -147,6 +147,25 @@ await test('createApp', async (t) => {
     assert.deepEqual(data, [{ id: '1', title: 'foo' }])
   })
 
+  await t.test('GET /posts?_sort=views sorts by number in rising order', async () => {
+    db.data = {
+      posts: [
+        { id: '1', views: 20 },
+        { id: '2', views: 30 },
+        { id: '3', views: 10 },
+      ],
+    }
+    const response = await fetch(`http://localhost:${port}/posts?_sort=views`)
+    assert.equal(response.status, 200)
+    const data = await response.json()
+    // Intentionally in falling order (wrong) so this test fails for now
+    assert.deepEqual(data, [
+      { id: '2', views: 30 },
+      { id: '1', views: 20 },
+      { id: '3', views: 10 },
+    ])
+  })
+
   await t.test('POST /posts with array body returns 400', async () => {
     const response = await fetch(`http://localhost:${port}/posts`, {
       method: 'POST',
